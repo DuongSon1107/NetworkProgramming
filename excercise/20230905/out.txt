@@ -1,0 +1,7 @@
+total 56
+-rw-r--r-- 1 sonduong sonduong 10600 May 22 22:45 chat_sever.c
+-rw-r--r-- 1 sonduong sonduong    47 May 22 23:54 database.txt
+-rw-r--r-- 1 sonduong sonduong     0 May 23 00:04 out.txt
+drwxr-xr-x 2 sonduong sonduong  4096 May 22 23:57 output
+-rwxr-xr-x 1 sonduong sonduong 21272 May 23 00:02 telnet_server
+-rw-r--r-- 1 sonduong sonduong 11487 May 22 23:57 telnet_server.c

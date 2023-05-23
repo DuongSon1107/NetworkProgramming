@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
     FD_SET(STDIN_FILENO, &readfds);
     FD_SET(client_socket, &readfds);
 
-    printf("Đã kết nối tới máy chủ.Hãy nhập tin nhắn:\n");
+    printf("Đã kết nối tới máy chủ thành công.Hãy nhập tin nhắn:\n");
 
     while (1) {
         fd_set tmp_fds = readfds;

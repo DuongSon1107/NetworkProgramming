@@ -1,180 +1,143 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
-
-#define MAX_BUFFER_SIZE 1024
+#include <sys/select.h> 
+#include <errno.h>  
+;
 #define MAX_CLIENTS 10
+#define BUFFER_SIZE 1024
 
-int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("Usage: %s port\n", argv[0]);
-        return 1;
+int main() {
+    int serverSocket, clientSockets[MAX_CLIENTS];
+    struct sockaddr_in serverAddress, clientAddress;
+    fd_set readfds;
+    int maxSd, activity, i, valread, sd;
+    int numClients = 0;
+    char buffer[BUFFER_SIZE];
+
+    // Khởi tạo mảng 
+    for (i = 0; i < MAX_CLIENTS; i++) {
+        clientSockets[i] = 0;
     }
 
-    int port = atoi(argv[1]);
-
-    // Tạo socket TCP
-    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket < 0) {
-        perror("Failed to create socket");
-        return 1;
+    // Tạo socket server
+    if ((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("Không thể tạo socket");
+        exit(EXIT_FAILURE);
     }
 
-    // Thiết lập địa chỉ và cổng của server
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    server_addr.sin_port = htons(port);
+    // Thiết lập thông tin địa chỉ server
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_addr.s_addr = INADDR_ANY;
+    serverAddress.sin_port = htons(8888);
 
-    // Gán địa chỉ và cổng cho socket
-    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    // Bind socket với địa chỉ và cổng
+    if (bind(serverSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
         perror("Bind failed");
-        return 1;
+        exit(EXIT_FAILURE);
     }
 
     // Lắng nghe kết nối từ client
-    if (listen(server_socket, MAX_CLIENTS) < 0) {
+    if (listen(serverSocket, 3) < 0) {
         perror("Listen failed");
-        return 1;
+        exit(EXIT_FAILURE);
     }
 
-    printf("Server is running. Waiting for clients...\n");
+    printf("Đang chờ kết nối từ client...\n");
 
-    // Mảng lưu trữ các client socket
-    int client_sockets[MAX_CLIENTS];
-    memset(client_sockets, 0, sizeof(client_sockets));
-
-    // Biến đếm số lượng client đang kết nối
-    int num_clients = 0;
-
+    socklen_t addrlen;
     while (1) {
-        // Tạo tập file mô tả (descriptor set)
-        fd_set read_fds;
-        FD_ZERO(&read_fds);
-        FD_SET(server_socket, &read_fds);
+        // Xóa tập hợp readfds và thêm socket server vào tập hợp
+        FD_ZERO(&readfds);
+        FD_SET(serverSocket, &readfds);
+        maxSd = serverSocket;
 
-        int max_fd = server_socket;
+        // Thêm các client sockets vào tập hợp
+        for (i = 0; i < MAX_CLIENTS; i++) {
+            sd = clientSockets[i];
 
-        // Thêm các client socket vào tập file mô tả
-        for (int i = 0; i < MAX_CLIENTS; ++i) {
-            int client_socket = client_sockets[i];
+            if (sd > 0) {
+                FD_SET(sd, &readfds);
+            }
 
-            if (client_socket > 0) {
-                FD_SET(client_socket, &read_fds);
-                if (client_socket > max_fd) {
-                    max_fd = client_socket;
-                }
+            if (sd > maxSd) {
+                maxSd = sd;
             }
         }
 
-        // Sử dụng hàm select để kiểm tra các socket có dữ liệu để đọc
-        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) < 0) {
-            perror("Select failed");
-            return 1;
+        // Sử dụng hàm select để chờ sự kiện trên các socket
+        activity = select(maxSd + 1, &readfds, NULL, NULL, NULL);
+
+        if ((activity < 0) && (errno != EINTR)) {
+            printf("Hàm select thất bại\n");
         }
 
-        // Kiểm tra xem server socket có sẵn dữ liệu để đọc hay không
-        if (FD_ISSET(server_socket, &read_fds)) {
-            struct sockaddr_in client_addr;
-            socklen_t addr_len = sizeof(client_addr);
-
-            // Chấp nhận kết nối từ client
-            int client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &addr_len);
-            if (client_socket < 0) {
-                perror("Accept failed");
-                return 1;
+        // Xử lý kết nối mới từ client
+        if (FD_ISSET(serverSocket, &readfds)) {
+            int newSocket;
+            addrlen = sizeof(clientAddress);
+            if ((newSocket = accept(serverSocket, (struct sockaddr *)&clientAddress, (socklen_t *)&addrlen)) < 0) {
+                perror("Chấp nhận kết nối thất bại");
+                exit(EXIT_FAILURE);
             }
 
-            // Thêm client socket vào mảng
-            for (int i = 0; i < MAX_CLIENTS; ++i) {
-                if (client_sockets[i] == 0) {
-                    client_sockets[i] = client_socket;
-                    ++num_clients;
+            // Gửi xâu chào kèm số lượng client đang kết nối
+            char welcomeMessage[BUFFER_SIZE];
+            sprintf(welcomeMessage, "Xin chào. Hiện có %d clients đang kết nối.\n", numClients);
+            send(newSocket, welcomeMessage, strlen(welcomeMessage), 0);
+
+            // Thêm socket mới vào mảng clientSockets
+            for (i = 0; i < MAX_CLIENTS; i++) {
+                if (clientSockets[i] == 0) {
+                    clientSockets[i] = newSocket;
+                    numClients++;
                     break;
                 }
             }
-
-            // Gửi thông báo số lượng client đang kết nối cho client
-            char message[MAX_BUFFER_SIZE];
-            snprintf(message, MAX_BUFFER_SIZE, "Xin chào. Hiện có %d clients đang kết nối.\n", num_clients);
-            send(client_socket, message, strlen(message), 0);
-
-            printf("Client connected: %s\n", inet_ntoa(client_addr.sin_addr));
         }
 
-        // Kiểm tra xem client socket có sẵn dữ liệu để đọc hay không
-        for (int i = 0; i < MAX_CLIENTS; ++i) {
-            int client_socket = client_sockets[i];
+        // Xử lý dữ liệu từ các client đang kết nối
+        for (i = 0; i < MAX_CLIENTS; i++) {
+            sd = clientSockets[i];
 
-            if (client_socket > 0 && FD_ISSET(client_socket, &read_fds)) {
-                char buffer[MAX_BUFFER_SIZE];
-                memset(buffer, 0, sizeof(buffer));
+            if (FD_ISSET(sd, &readfds)) {
+                // Đọc dữ liệu từ client
+                if ((valread = read(sd, buffer, BUFFER_SIZE)) == 0) {
+                    // Client đã đóng kết nối
+                    getpeername(sd, (struct sockaddr *)&clientAddress, (socklen_t *)&addrlen);
+                    printf("Client đã đóng kết nối, IP: %s, Port: %d\n", inet_ntoa(clientAddress.sin_addr), ntohs(clientAddress.sin_port));
 
-                // Nhận dữ liệu từ client
-                ssize_t num_bytes = recv(client_socket, buffer, MAX_BUFFER_SIZE - 1, 0);
-
-                if (num_bytes <= 0) {
-                    // Đóng kết nối và xóa client socket khỏi mảng
-                    close(client_socket);
-                    client_sockets[i] = 0;
-                    --num_clients;
+                    // Đóng socket và xóa khỏi mảng clientSockets
+                    close(sd);
+                    clientSockets[i] = 0;
+                    numClients--;
                 } else {
-                    // Xử lý tin nhắn từ client
-                    buffer[num_bytes] = '\0';
-
-                    // Kiểm tra nếu client gửi "exit"
-                    if (strcmp(buffer, "exit") == 0) {
-                        char goodbye_message[] = "Tạm biệt.\n";
-                        send(client_socket, goodbye_message, strlen(goodbye_message), 0);
-
-                        // Đóng kết nối và xóa client socket khỏi mảng
-                        close(client_socket);
-                        client_sockets[i] = 0;
-                        --num_clients;
-                    } else {
-                        // Chuẩn hóa xâu ký tự và gửi lại kết quả cho client
-                        char *token;
-                        char *delimiters = " \t\r\n";
-                        char response[MAX_BUFFER_SIZE];
-                        memset(response, 0, sizeof(response));
-
-                        // Xóa ký tự dấu cách ở đầu xâu
-                        token = strtok(buffer, delimiters);
-                        if (token != NULL) {
-                            strcpy(response, token);
-                        }
-
-                        // Xóa ký tự dấu cách ở cuối xâu
-                        token = strtok(NULL, delimiters);
-                        while (token != NULL) {
-                            strcat(response, " ");
-                            strcat(response, token);
-                            token = strtok(NULL, delimiters);
-                        }
-
-                        // Chuẩn hóa chữ cái đầu của từ và viết thường các ký tự còn lại
-                        int len = strlen(response);
-                        for (int j = 0; j < len; ++j) {
-                            if (j == 0 || response[j - 1] == ' ') {
-                                response[j] = toupper(response[j]);
+                    // Chuẩn hóa xâu ký tự
+                    int j;
+                    int word_start = 1;
+                    for (j = 0; j < valread; j++) {
+                        if (isspace(buffer[j])) {
+                            word_start = 1;
+                        } else {
+                            if (word_start) {
+                                buffer[j] = toupper(buffer[j]);
+                                word_start = 0;
                             } else {
-                                response[j] = tolower(response[j]);
+                                buffer[j] = tolower(buffer[j]);
                             }
                         }
-
-                        send(client_socket, response, strlen(response), 0);
                     }
+                    buffer[j] = '\0';
+
+                    // Gửi kết quả chuẩn hóa xâu cho client
+                    send(sd, buffer, strlen(buffer), 0);
                 }
             }
         }
     }
-
-    // Đóng server socket
-    close(server_socket);
 
     return 0;
 }
